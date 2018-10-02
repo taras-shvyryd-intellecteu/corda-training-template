@@ -1,7 +1,10 @@
 package net.corda.training.state
 
-import net.corda.core.contracts.ContractState
+import net.corda.core.contracts.Amount
+import net.corda.core.contracts.LinearState
+import net.corda.core.contracts.UniqueIdentifier
 import net.corda.core.identity.Party
+import java.util.*
 
 /**
  * This is where you'll add the definition of your state object. Look at the unit tests in [IOUStateTests] for
@@ -9,6 +12,19 @@ import net.corda.core.identity.Party
  *
  * Remove the "val data: String = "data" property before starting the [IOUState] tasks.
  */
-data class IOUState(val data: String = "data"): ContractState {
-    override val participants: List<Party> get() = listOf()
+data class IOUState(val amount: Amount<Currency>,
+                    val lender: Party,
+                    val borrower: Party,
+                    val paid: Amount<Currency> = Amount(0, amount.token),
+                    override val linearId: UniqueIdentifier = UniqueIdentifier()) : LinearState {
+    override val participants: List<Party> get() = listOf(lender, borrower)
+
+    fun pay(amount: Amount<Currency>): IOUState{
+        val state = copy(paid = paid.plus(amount))
+        return state
+    }
+
+    fun withNewLender(lender: Party): IOUState{
+        return copy(lender = lender)
+    }
 }
