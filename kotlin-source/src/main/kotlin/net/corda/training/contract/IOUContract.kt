@@ -2,6 +2,8 @@ package net.corda.training.contract
 
 import net.corda.core.contracts.*
 import net.corda.core.transactions.LedgerTransaction
+import net.corda.finance.contracts.asset.Cash
+import net.corda.finance.utils.sumCash
 import net.corda.training.state.IOUState
 
 /**
@@ -25,6 +27,7 @@ class IOUContract : Contract {
         // class DoSomething : TypeOnlyCommandData(), Commands
         class Issue : TypeOnlyCommandData(), Commands
         class Transfer : TypeOnlyCommandData(), Commands
+        class Settle : TypeOnlyCommandData(), Commands
     }
 
     /**
@@ -51,6 +54,31 @@ class IOUContract : Contract {
                 "Only the lender property may change." using (input == output.withNewLender(input.lender))
                 "The lender property must change in a transfer." using (input.lender != output.lender)
                 "The borrower, old lender and new lender only must sign an IOU transfer transaction" using (command.signers.toSet() == input.participants.map { it.owningKey }.union(output.participants.map { it.owningKey }).toSet())
+            }
+            is Commands.Settle -> {
+                val ious = tx.groupStates<IOUState, UniqueIdentifier> { it.linearId }.single()
+                requireThat { "There must be one input IOU." using (ious.inputs.size == 1) }
+                val cash = tx.outputsOfType<Cash.State>()
+                requireThat { "There must be output cash." using (cash.isNotEmpty()) }
+                val acceptableCash = cash.filter { it.owner == ious.inputs.single().lender}
+                requireThat { "There must be output cash paid to the recipient." using (acceptableCash.isNotEmpty()) }
+                val sumAcceptableCash = acceptableCash.sumCash().withoutIssuer()
+                val amountOutstanding = ious.inputs.single().amount - ious.inputs.single().paid
+                requireThat { "The amount settled cannot be more than the amount outstanding." using (amountOutstanding >= sumAcceptableCash) }
+                if (amountOutstanding == sumAcceptableCash) {
+                    requireThat { "There must be no output IOU as it has been fully settled." using (ious.outputs.isEmpty()) }
+                } else {
+                    requireThat { "There must be one output IOU." using (ious.outputs.size == 1) }
+                    val outputIou = ious.outputs.single()
+                    requireThat {
+                        "The amount may not change when settling." using (ious.inputs.single().amount == outputIou.amount)
+                        "The borrower may not change when settling." using (ious.inputs.single().borrower == outputIou.borrower)
+                        "The lender may not change when settling." using (ious.inputs.single().lender == outputIou.lender)
+                    }
+                }
+                requireThat {
+                    "Both lender and borrower together only must sign IOU settle transaction." using (command.signers.toSet() == ious.inputs.single().participants.map { it.owningKey }.toSet())
+                }
             }
         }
     }
